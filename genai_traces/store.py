@@ -24,10 +24,10 @@ from sqlalchemy import (
     and_,
     create_engine,
     delete,
+    event,
     func,
     insert,
     select,
-    tuple_,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
@@ -87,16 +87,51 @@ traces = Table(
     Column("complete", Integer, nullable=False),  # 1 when the root span has arrived
 )
 
+SUMMARY_COLUMNS = [
+    spans.c[name]
+    for name in (
+        "trace_id",
+        "span_id",
+        "parent_span_id",
+        "name",
+        "service",
+        "kind",
+        "start_ns",
+        "end_ns",
+        "status",
+        "model",
+        "input_tokens",
+        "output_tokens",
+        "cost_usd",
+        "agent_name",
+        "conversation_id",
+    )
+]
 USAGE_KINDS = ("llm", "embeddings")  # where token usage is counted; agent spans may repeat it
 
 
 def make_engine(url: str) -> Engine:
-    if url.startswith("sqlite"):
-        kwargs: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
-        if url in ("sqlite://", "sqlite:///:memory:"):
-            kwargs["poolclass"] = StaticPool
-        return create_engine(url, **kwargs)
-    return create_engine(url, pool_pre_ping=True)
+    if not url.startswith("sqlite"):
+        return create_engine(url, pool_pre_ping=True)
+    in_memory = url in ("sqlite://", "sqlite:///:memory:")
+    kwargs: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
+    if in_memory:
+        kwargs["poolclass"] = StaticPool
+    engine = create_engine(url, **kwargs)
+    if not in_memory:
+
+        @event.listens_for(engine, "connect")
+        def _pragmas(dbapi_conn, _record) -> None:
+            # WAL lets the viewer read while an export is being written. synchronous=NORMAL
+            # survives a crash of this process; a power cut can lose the last commits, a fair
+            # trade for telemetry, and it removes an fsync from every export.
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.close()
+
+    return engine
 
 
 @dataclass
@@ -135,28 +170,27 @@ class Store:
         if not rows:
             return [], set()
         unique = {(r["trace_id"], r["span_id"]): r for r in rows}
+        trace_ids = sorted({trace_id for trace_id, _ in unique})
+        by_trace: dict[str, list[dict[str, Any]]] = {}
         with self.engine.begin() as conn:
-            existing = set()
-            keys = list(unique)
-            for i in range(0, len(keys), 500):
-                chunk = keys[i : i + 500]
-                result = conn.execute(
-                    select(spans.c.trace_id, spans.c.span_id).where(
-                        tuple_(spans.c.trace_id, spans.c.span_id).in_(chunk)
-                    )
-                )
-                existing.update((t, s) for t, s in result)
+            # One read of the summary columns of every span already stored for these traces:
+            # it answers both "was this span sent before?" and "what does the trace hold now?".
+            for i in range(0, len(trace_ids), 500):
+                query = select(*SUMMARY_COLUMNS).where(spans.c.trace_id.in_(trace_ids[i : i + 500]))
+                for r in conn.execute(query):
+                    by_trace.setdefault(r.trace_id, []).append(dict(r._mapping))
+            existing = {(r["trace_id"], r["span_id"]) for rs in by_trace.values() for r in rs}
             new = [row for key, row in unique.items() if key not in existing]
-            if new:
-                conn.execute(insert(spans), new)
+            if not new:
+                return [], set()
+            conn.execute(insert(spans), new)
             touched = {row["trace_id"] for row in new}
-            for trace_id in touched:
-                trace_rows = [
-                    dict(r._mapping)
-                    for r in conn.execute(select(spans).where(spans.c.trace_id == trace_id))
-                ]
-                conn.execute(delete(traces).where(traces.c.trace_id == trace_id))
-                conn.execute(insert(traces), summarize(trace_rows))
+            for row in new:
+                by_trace.setdefault(row["trace_id"], []).append(row)
+            ordered = sorted(touched)
+            for i in range(0, len(ordered), 500):
+                conn.execute(delete(traces).where(traces.c.trace_id.in_(ordered[i : i + 500])))
+            conn.execute(insert(traces), [summarize(by_trace[t]) for t in ordered])
         return new, touched
 
     def prune(self, older_than_ns: int) -> int:
