@@ -13,15 +13,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
 from prometheus_client import Histogram as PromHistogram
 
-from . import __version__
-from .analytics import HOUR_NS, stats
+from . import __version__, views
 from .config import Settings
 from .ingest import Ingestor
 from .otlp import BodyTooLarge, OTLPDecodeError, decompress, encode_response, flatten
 from .otlp import parse_request as parse_otlp
 from .pricing import PriceTable
 from .store import Store, TraceFilter
-from .tree import build_tree
 
 log = logging.getLogger("genai_traces")
 
@@ -192,11 +190,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         summary="One trace: summary and span tree",
     )
     def get_trace(trace_id: str) -> dict[str, Any]:
-        found = store.get_trace(trace_id.lower())
-        if found is None:
+        body = views.trace_detail(store, trace_id)
+        if body is None:
             raise HTTPException(404, "trace not found")
-        summary, rows = found
-        return {"trace": summary, "spans": build_tree(rows)}
+        return body
 
     @app.get(
         "/api/conversations/{conversation_id}",
@@ -205,19 +202,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         summary="Every trace of one conversation (gen_ai.conversation.id), oldest first",
     )
     def get_conversation(conversation_id: str) -> dict[str, Any]:
-        items = store.list_traces(TraceFilter(conversation_id=conversation_id, limit=500))
-        if not items:
+        body = views.conversation(store, conversation_id)
+        if body is None:
             raise HTTPException(404, "conversation not found")
-        items.reverse()
-        return {
-            "conversation_id": conversation_id,
-            "turns": len(items),
-            "input_tokens": sum(t["input_tokens"] for t in items),
-            "output_tokens": sum(t["output_tokens"] for t in items),
-            "cost_usd": round(sum(t["cost_usd"] for t in items), 6),
-            "duration_ms": round(sum(t["duration_ms"] for t in items), 3),
-            "traces": items,
-        }
+        return body
 
     @app.get(
         "/api/stats",
@@ -229,15 +217,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         hours: int = Query(24, ge=1, le=24 * 31),
         until_ns: int | None = Query(None, description="End of the window; default now"),
     ) -> dict[str, Any]:
-        now = until_ns or time.time_ns()
-        since = now - hours * HOUR_NS
-        trace_rows = [
-            t
-            for t in store.list_traces(TraceFilter(since_ns=since, limit=100_000))
-            if t["start_ns"] <= now
-        ]
-        span_rows = [s for s in store.spans_since(since) if s["start_ns"] <= now]
-        return stats(span_rows, trace_rows, since, now)
+        return views.window_stats(store, hours, until_ns or time.time_ns())
 
     @app.get("/api/services", tags=["query"], dependencies=reader, summary="Known services")
     def get_services() -> list[str]:
