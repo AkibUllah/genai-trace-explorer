@@ -3,7 +3,14 @@ import json
 
 import pytest
 
-from genai_traces.otlp import OTLPDecodeError, decompress, encode_response, flatten, parse_request
+from genai_traces.otlp import (
+    BodyTooLarge,
+    OTLPDecodeError,
+    decompress,
+    encode_response,
+    flatten,
+    parse_request,
+)
 from tests.helpers import T0, Recorder, agent_trace
 
 
@@ -129,6 +136,17 @@ def test_decompress():
         decompress(b"abc", "gzip")
     with pytest.raises(OTLPDecodeError):
         decompress(b"abc", "br")
+    with pytest.raises(OTLPDecodeError):
+        decompress(gzip.compress(b"abc" * 100)[:-12], "gzip")  # truncated
+
+
+def test_decompression_bomb_is_stopped_at_the_limit():
+    bomb = gzip.compress(b"\0" * 10_000_000)
+    assert len(bomb) < 20_000
+    with pytest.raises(BodyTooLarge):
+        decompress(bomb, "gzip", max_bytes=1_000_000)
+    with pytest.raises(BodyTooLarge):
+        decompress(b"x" * 2000, None, max_bytes=1000)
 
 
 def test_partial_success_response():

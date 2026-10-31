@@ -127,13 +127,13 @@ class Store:
 
     # -- writes ---------------------------------------------------------------------------------
 
-    def add_spans(self, rows: Sequence[dict[str, Any]]) -> tuple[int, set[str]]:
+    def add_spans(self, rows: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], set[str]]:
         """Insert new spans (re-sent ones are skipped) and refresh the touched trace summaries.
 
-        Returns how many spans were new and the ids of the traces that changed.
+        Returns the rows that were new and the ids of the traces that changed.
         """
         if not rows:
-            return 0, set()
+            return [], set()
         unique = {(r["trace_id"], r["span_id"]): r for r in rows}
         with self.engine.begin() as conn:
             existing = set()
@@ -157,7 +157,7 @@ class Store:
                 ]
                 conn.execute(delete(traces).where(traces.c.trace_id == trace_id))
                 conn.execute(insert(traces), summarize(trace_rows))
-        return len(new), touched
+        return new, touched
 
     def prune(self, older_than_ns: int) -> int:
         """Delete traces that started before the cut-off, with their spans."""

@@ -18,6 +18,7 @@ class IngestResult:
     accepted: int
     duplicates: int
     traces: set[str] = field(default_factory=set)
+    new_rows: list[dict[str, Any]] = field(default_factory=list)
 
 
 class Ingestor:
@@ -70,7 +71,11 @@ class Ingestor:
 
     def ingest(self, raw: list[RawSpan]) -> IngestResult:
         rows = [self.row(span) for span in raw]
-        accepted, touched = self.store.add_spans(rows)
+        new, touched = self.store.add_spans(rows)
         return IngestResult(
-            received=len(raw), accepted=accepted, duplicates=len(raw) - accepted, traces=touched
+            received=len(raw),
+            accepted=len(new),
+            duplicates=len(raw) - len(new),
+            traces=touched,
+            new_rows=new,
         )

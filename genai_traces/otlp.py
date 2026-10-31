@@ -8,7 +8,6 @@ here: trace and span ids are hex strings, not base64, so they are rewritten befo
 from __future__ import annotations
 
 import base64
-import gzip
 import json
 import zlib
 from dataclasses import dataclass, field
@@ -59,18 +58,30 @@ class RawSpan:
         return str(self.resource.get("service.name") or "unknown_service")
 
 
-def decompress(body: bytes, encoding: str | None) -> bytes:
+class BodyTooLarge(OTLPDecodeError):
+    """The body, or what it decompresses to, is over the configured limit."""
+
+
+def decompress(body: bytes, encoding: str | None, max_bytes: int = 50_000_000) -> bytes:
+    """Undo Content-Encoding without ever holding more than ``max_bytes`` of output."""
     encoding = (encoding or "identity").lower().strip()
-    try:
-        if encoding == "gzip":
-            return gzip.decompress(body)
-        if encoding == "deflate":
-            return zlib.decompress(body)
-    except (OSError, zlib.error, EOFError) as exc:
-        raise OTLPDecodeError(f"invalid {encoding} body") from exc
-    if encoding not in ("identity", ""):
+    if encoding in ("identity", ""):
+        if len(body) > max_bytes:
+            raise BodyTooLarge(f"body is larger than {max_bytes} bytes")
+        return body
+    if encoding not in ("gzip", "deflate"):
         raise OTLPDecodeError(f"unsupported Content-Encoding {encoding!r}")
-    return body
+    wbits = 16 + zlib.MAX_WBITS if encoding == "gzip" else zlib.MAX_WBITS
+    inflater = zlib.decompressobj(wbits)
+    try:
+        out = inflater.decompress(body, max_bytes + 1)
+    except zlib.error as exc:
+        raise OTLPDecodeError(f"invalid {encoding} body") from exc
+    if len(out) > max_bytes:
+        raise BodyTooLarge(f"decompressed body is larger than {max_bytes} bytes")
+    if not inflater.eof:
+        raise OTLPDecodeError(f"truncated {encoding} body")
+    return out
 
 
 def parse_request(body: bytes, content_type: str | None) -> ExportTraceServiceRequest:

@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     ingest_token: str | None = Field(
         default=None, description="When set, POST /v1/traces requires 'Authorization: Bearer ...'"
     )
+    read_token: str | None = Field(
+        default=None, description="When set, the query API requires 'Authorization: Bearer ...'"
+    )
     capture_content: bool = Field(
         default=False,
         description="Keep prompt/completion/tool-argument attributes; dropped at ingest when false",
@@ -29,7 +32,7 @@ class Settings(BaseSettings):
     retention_days: int = Field(default=14, ge=1)
     log_level: str = "INFO"
 
-    @field_validator("ingest_token", "pricing_file", mode="before")
+    @field_validator("ingest_token", "read_token", "pricing_file", mode="before")
     @classmethod
     def _blank_is_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
