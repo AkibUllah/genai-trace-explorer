@@ -215,3 +215,10 @@ def test_real_otlp_exporter_end_to_end(tmp_path):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+def test_viewer_page_is_served(client):
+    page = client.get("/")
+    assert page.status_code == 200
+    assert '<meta name="gtx-mode" content="api">' in page.text
+    assert "function esc(" in page.text  # every attribute value is escaped before rendering

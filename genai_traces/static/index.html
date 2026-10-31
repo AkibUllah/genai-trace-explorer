@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="gtx-mode" content="api">
+<title>GenAI Trace Explorer</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5f6b7a; --line: #e2e6ec;
+  --accent: #3d63dd; --error: #d93b3b; --ok: #1f8a5b; --hover: #eef2fb; --bar-bg: #f0f2f5;
+  --llm: #7c4dde; --tool: #c98a0c; --agent: #3d63dd; --embeddings: #138a8a; --retrieval: #2f8f3a; --other: #8a94a3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --panel: #1a1e26; --text: #e4e8ef; --muted: #98a2b3; --line: #2b313c;
+    --accent: #7d9bff; --error: #ff6b6b; --ok: #4cc38a; --hover: #232a36; --bar-bg: #222832;
+    --llm: #a988ff; --tool: #f0b43c; --agent: #7d9bff; --embeddings: #3cc7c7; --retrieval: #5cc46a; --other: #7c8696;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; margin: 0; }
+header .note { color: var(--muted); font-size: 13px; }
+header .spacer { flex: 1; }
+header a { color: var(--accent); }
+input, select, button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+button { cursor: pointer; }
+main { padding: 16px 20px; max-width: 1500px; margin: 0 auto; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.card .label { color: var(--muted); font-size: 12px; }
+.card .value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+.tabs button { border-radius: 6px 6px 0 0; }
+.tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.layout { display: grid; grid-template-columns: minmax(300px, 420px) 1fr; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; border-bottom: 1px solid var(--line); }
+.filters input { flex: 1; min-width: 120px; }
+.list { max-height: 70vh; overflow-y: auto; }
+.row { padding: 9px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.row:hover, .row.selected { background: var(--hover); }
+.row .top { display: flex; justify-content: space-between; gap: 8px; }
+.row .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; }
+.badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid currentColor; }
+.badge.error { color: var(--error); }
+.badge.warn { color: var(--tool); }
+.detail { padding: 14px; min-height: 300px; }
+.detail h2 { margin: 0 0 4px; font-size: 16px; }
+.detail .sub { color: var(--muted); font-size: 12px; margin-bottom: 10px; word-break: break-all; }
+.empty { color: var(--muted); padding: 30px; text-align: center; }
+.wf { width: 100%; border-collapse: collapse; }
+.wf td { padding: 3px 4px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.wf tr { cursor: pointer; }
+.wf tr:hover, .wf tr.selected { background: var(--hover); }
+.wf .sname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.wf .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.track { position: relative; height: 14px; background: var(--bar-bg); border-radius: 3px; min-width: 160px; }
+.bar { position: absolute; top: 2px; height: 10px; border-radius: 2px; min-width: 2px; }
+.bar.err { outline: 2px solid var(--error); outline-offset: 0; }
+.crit { color: var(--error); font-size: 11px; margin-left: 4px; }
+.attrs { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.attrs table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.attrs td { padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; word-break: break-word; }
+.attrs td:first-child { color: var(--muted); width: 38%; font-family: ui-monospace, monospace; }
+.attrs pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th, .tbl td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; }
+.tbl th:first-child, .tbl td:first-child { text-align: left; }
+.tbl th { color: var(--muted); font-weight: 500; font-size: 12px; }
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 60px; padding: 10px; }
+.spark div { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .85; }
+.section-title { padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
+a.link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GenAI Trace Explorer</h1>
+  <span class="note" id="mode-note"></span>
+  <span class="spacer"></span>
+  <input id="token" type="password" placeholder="read token (if set)" class="hidden" size="16" aria-label="Read token">
+  <a href="https://github.com/AkibUllah/genai-trace-explorer">source</a>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+  <div class="tabs">
+    <button id="tab-traces" class="active">Traces</button>
+    <button id="tab-overview">Models &amp; tools</button>
+  </div>
+
+  <section id="view-traces" class="layout">
+    <div class="panel">
+      <div class="filters">
+        <input id="f-q" placeholder="search root span name" aria-label="Search">
+        <select id="f-status" aria-label="Status">
+          <option value="">any status</option>
+          <option value="has_errors">has errors</option>
+          <option value="error">failed</option>
+          <option value="ok">succeeded</option>
+        </select>
+        <select id="f-service" aria-label="Service"><option value="">all services</option></select>
+        <select id="f-model" aria-label="Model"><option value="">all models</option></select>
+      </div>
+      <div class="list" id="list"></div>
+    </div>
+    <div class="panel detail" id="detail"><div class="empty">Select a trace</div></div>
+  </section>
+
+  <section id="view-overview" class="hidden">
+    <div class="panel" style="margin-bottom:14px">
+      <div class="section-title">Traces per hour</div>
+      <div class="spark" id="spark"></div>
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="section-title">Models</div>
+      <div style="overflow-x:auto"><table class="tbl" id="models"></table></div>
+    </div>
+    <div class="panel">
+      <div class="section-title">Tools</div>
+      <div style="overflow-x:auto"><table class="tbl" id="tools"></table></div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const STATIC = document.querySelector('meta[name="gtx-mode"]').content === "static";
+const KINDS = ["agent", "llm", "tool", "embeddings", "retrieval", "other"];
+const $ = (id) => document.getElementById(id);
+const state = { traces: [], selected: null, selectedSpan: null, stats: null };
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+const fmtMs = (ms) => ms == null ? "–" : ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : ms.toFixed(ms < 10 ? 1 : 0) + " ms";
+const fmtUsd = (v) => v == null ? "–" : "$" + (v < 0.01 && v > 0 ? v.toFixed(5) : v.toFixed(4));
+const fmtInt = (v) => v == null ? "–" : Number(v).toLocaleString("en-US");
+const fmtTime = (ns) => new Date(ns / 1e6).toLocaleString();
+const safeId = (id) => /^[0-9a-f]{32}$/.test(id) ? id : null;
+
+function token() { try { return localStorage.getItem("gtx-token") || ""; } catch { return ""; } }
+
+async function getJSON(path, params) {
+  let url;
+  if (STATIC) {
+    url = path.replace(/^\/api\//, "data/") + ".json";
+  } else {
+    const qs = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v !== "" && v != null));
+    url = path + (qs.toString() ? "?" + qs : "");
+  }
+  const headers = token() ? { authorization: "Bearer " + token() } : {};
+  const res = await fetch(url, { headers });
+  if (res.status === 401) { $("token").classList.remove("hidden"); throw new Error("This server needs a read token."); }
+  if (!res.ok) throw new Error(res.status + " " + res.statusText);
+  return res.json();
+}
+
+function filters() {
+  return { q: $("f-q").value.trim(), status: $("f-status").value, service: $("f-service").value, model: $("f-model").value };
+}
+
+function applyStaticFilters(items, f) {
+  return items.filter((t) =>
+    (!f.q || t.name.toLowerCase().includes(f.q.toLowerCase())) &&
+    (!f.service || t.service === f.service) &&
+    (!f.model || t.models.includes(f.model)) &&
+    (!f.status || (f.status === "error" ? t.status === "error" : f.status === "ok" ? t.status !== "error" : t.error_count > 0)));
+}
+
+async function loadTraces() {
+  const f = filters();
+  try {
+    const page = await getJSON("/api/traces", STATIC ? {} : { ...f, limit: 200 });
+    state.traces = STATIC ? applyStaticFilters(page.items, f) : page.items;
+    renderList();
+  } catch (err) {
+    $("list").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+  }
+}
+
+function renderList() {
+  if (!state.traces.length) {
+    $("list").innerHTML = `<div class="empty">No traces yet. Point an OTLP/HTTP exporter at <code>/v1/traces</code>, or run <code>genai-traces demo</code>.</div>`;
+    return;
+  }
+  $("list").innerHTML = state.traces.map((t) => `
+    <div class="row ${t.trace_id === state.selected ? "selected" : ""}" data-id="${esc(t.trace_id)}">
+      <div class="top"><span class="name">${esc(t.name)}</span><span>${fmtMs(t.duration_ms)}</span></div>
+      <div class="meta">
+        <span>${esc(t.service)}</span>
+        <span>${t.llm_calls} LLM · ${t.tool_calls} tool</span>
+        <span>${fmtInt(t.input_tokens + t.output_tokens)} tok</span>
+        <span>${fmtUsd(t.cost_usd)}</span>
+        ${t.status === "error" ? '<span class="badge error">failed</span>' : t.error_count ? `<span class="badge warn">${t.error_count} error${t.error_count > 1 ? "s" : ""}</span>` : ""}
+        ${t.complete ? "" : '<span class="badge">partial</span>'}
+      </div>
+    </div>`).join("");
+  for (const el of $("list").querySelectorAll(".row")) el.onclick = () => selectTrace(el.dataset.id);
+}
+
+async function selectTrace(id, pushHash = true) {
+  if (!safeId(id)) return;
+  state.selected = id;
+  state.selectedSpan = null;
+  renderList();
+  if (pushHash) history.replaceState(null, "", "#trace=" + id);
+  try {
+    renderDetail(await getJSON("/api/traces/" + id));
+  } catch (err) {
+    $("detail").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+  }
+}
+
+function renderDetail(data) {
+  const t = data.trace, spans = data.spans;
+  const total = Math.max(t.duration_ms, 0.001);
+  const conv = t.conversation_id ? ` · conversation <a class="link" id="conv-link">${esc(t.conversation_id)}</a>` : "";
+  $("detail").innerHTML = `
+    <h2>${esc(t.name)}</h2>
+    <div class="sub">${esc(t.trace_id)} · ${esc(t.service)} · ${fmtTime(t.start_ns)}${conv}</div>
+    <div class="cards">
+      ${card("Duration", fmtMs(t.duration_ms))}${card("Spans", t.span_count)}
+      ${card("Tokens in / out", fmtInt(t.input_tokens) + " / " + fmtInt(t.output_tokens))}
+      ${card("Cost", fmtUsd(t.cost_usd))}${card("Errors", t.error_count)}
+    </div>
+    <div class="legend">${KINDS.map((k) => `<span><span class="dot" style="background:var(--${k})"></span>${k}</span>`).join("")}<span><span class="crit">◆</span> critical path</span></div>
+    <div style="overflow-x:auto"><table class="wf"><tbody>
+    ${spans.map((s, i) => `
+      <tr data-i="${i}">
+        <td class="sname" style="padding-left:${4 + s.depth * 16}px" title="${esc(s.name)}"><span class="dot" style="background:var(--${KINDS.includes(s.kind) ? s.kind : "other"})"></span>${esc(s.name)}${s.critical ? '<span class="crit">◆</span>' : ""}${s.orphan ? ' <span class="badge">orphan</span>' : ""}</td>
+        <td style="width:45%"><div class="track"><div class="bar ${s.status === "error" ? "err" : ""}" style="left:${(s.offset_ms / total) * 100}%;width:${Math.max((s.duration_ms / total) * 100, 0.3)}%;background:var(--${KINDS.includes(s.kind) ? s.kind : "other"})"></div></div></td>
+        <td class="num">${fmtMs(s.duration_ms)}</td>
+        <td class="num">${s.kind === "llm" || s.kind === "embeddings" ? fmtInt((s.input_tokens || 0) + (s.output_tokens || 0)) + " tok" : ""}</td>
+      </tr>`).join("")}
+    </tbody></table></div>
+    <div class="attrs" id="span-attrs"><div class="empty">Select a span to see its attributes</div></div>`;
+  for (const row of $("detail").querySelectorAll("tr[data-i]")) {
+    row.onclick = () => {
+      for (const r of $("detail").querySelectorAll("tr.selected")) r.classList.remove("selected");
+      row.classList.add("selected");
+      renderSpan(spans[Number(row.dataset.i)]);
+    };
+  }
+  if ($("conv-link")) $("conv-link").onclick = () => showConversation(t.conversation_id);
+}
+
+function renderSpan(s) {
+  const rows = [
+    ["kind", s.kind], ["status", s.status + (s.status_message ? ": " + s.status_message : "")],
+    ["duration / self time", fmtMs(s.duration_ms) + " / " + fmtMs(s.self_ms)],
+    ["starts at", "+" + fmtMs(s.offset_ms)],
+  ];
+  if (s.model) rows.push(["model", s.model + (s.provider ? " (" + s.provider + ")" : "")]);
+  if (s.input_tokens != null || s.output_tokens != null) rows.push(["tokens in / out", fmtInt(s.input_tokens) + " / " + fmtInt(s.output_tokens)]);
+  if (s.cost_usd != null) rows.push(["cost", fmtUsd(s.cost_usd)]);
+  if (s.child_count) rows.push(["subtree tokens / cost", fmtInt(s.subtree_input_tokens + s.subtree_output_tokens) + " / " + fmtUsd(s.subtree_cost_usd)]);
+  for (const [k, v] of Object.entries(s.attributes)) rows.push([k, typeof v === "string" ? v : JSON.stringify(v, null, 1)]);
+  for (const e of s.events) rows.push(["event: " + e.name, JSON.stringify(e.attributes, null, 1)]);
+  $("span-attrs").innerHTML = `<h2>${esc(s.name)}</h2><table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td><pre>${esc(v)}</pre></td></tr>`).join("")}</table>`;
+}
+
+async function showConversation(id) {
+  try {
+    const c = await getJSON("/api/conversations/" + encodeURIComponent(id));
+    $("detail").innerHTML = `
+      <h2>Conversation ${esc(c.conversation_id)}</h2>
+      <div class="sub">${c.turns} turns</div>
+      <div class="cards">${card("Turns", c.turns)}${card("Tokens", fmtInt(c.input_tokens + c.output_tokens))}${card("Cost", fmtUsd(c.cost_usd))}${card("Time in agent", fmtMs(c.duration_ms))}</div>
+      <table class="tbl"><tr><th>turn</th><th>started</th><th>duration</th><th>tokens</th><th>cost</th><th>errors</th></tr>
+      ${c.traces.map((t, i) => `<tr><td><a class="link" data-id="${esc(t.trace_id)}">${i + 1}. ${esc(t.name)}</a></td><td>${fmtTime(t.start_ns)}</td><td>${fmtMs(t.duration_ms)}</td><td>${fmtInt(t.input_tokens + t.output_tokens)}</td><td>${fmtUsd(t.cost_usd)}</td><td>${t.error_count}</td></tr>`).join("")}
+      </table>`;
+    for (const a of $("detail").querySelectorAll("a[data-id]")) a.onclick = () => selectTrace(a.dataset.id);
+  } catch (err) {
+    $("detail").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+  }
+}
+
+const card = (label, value) => `<div class="card"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div></div>`;
+
+async function loadStats() {
+  const params = { hours: 24 * 7 };
+  try {
+    const s = await getJSON("/api/stats", params);
+    state.stats = s;
+    const t = s.totals;
+    $("cards").innerHTML = card("Traces", fmtInt(t.traces)) + card("With errors", fmtInt(t.traces_with_errors)) +
+      card("LLM calls", fmtInt(t.llm_calls)) + card("LLM p95", fmtMs(t.llm_p95_ms)) +
+      card("Tokens", fmtInt(t.input_tokens + t.output_tokens)) + card("Cost", fmtUsd(t.cost_usd));
+    const max = Math.max(1, ...s.timeline.map((b) => b.traces));
+    const buckets = s.timeline.slice(-72);
+    $("spark").innerHTML = buckets.map((b) => `<div title="${esc(fmtTime(b.start_ns))}: ${b.traces} traces, ${fmtUsd(b.cost_usd)}" style="height:${(b.traces / max) * 100}%"></div>`).join("");
+    $("models").innerHTML = `<tr><th>model</th><th>provider</th><th>calls</th><th>errors</th><th>tokens in</th><th>tokens out</th><th>p50</th><th>p95</th><th>cost</th></tr>` +
+      s.models.map((m) => `<tr><td>${esc(m.model)}</td><td>${esc(m.provider || "")}</td><td>${m.calls}</td><td>${m.errors}</td><td>${fmtInt(m.input_tokens)}</td><td>${fmtInt(m.output_tokens)}</td><td>${fmtMs(m.p50_ms)}</td><td>${fmtMs(m.p95_ms)}</td><td>${fmtUsd(m.cost_usd)}</td></tr>`).join("");
+    $("tools").innerHTML = `<tr><th>tool</th><th>calls</th><th>errors</th><th>error rate</th><th>p50</th><th>p95</th><th>error types</th></tr>` +
+      s.tools.map((x) => `<tr><td>${esc(x.tool)}</td><td>${x.calls}</td><td>${x.errors}</td><td>${(x.error_rate * 100).toFixed(1)}%</td><td>${fmtMs(x.p50_ms)}</td><td>${fmtMs(x.p95_ms)}</td><td>${esc(Object.entries(x.error_types).map(([k, v]) => k + " × " + v).join(", "))}</td></tr>`).join("");
+    fillSelect($("f-model"), s.models.map((m) => m.model), "all models");
+  } catch (err) {
+    $("cards").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+  }
+}
+
+function fillSelect(el, values, label) {
+  const current = el.value;
+  el.innerHTML = `<option value="">${esc(label)}</option>` + [...new Set(values)].sort().map((v) => `<option>${esc(v)}</option>`).join("");
+  el.value = current;
+}
+
+async function loadServices() {
+  try { fillSelect($("f-service"), await getJSON("/api/services"), "all services"); } catch { /* list shows the error */ }
+}
+
+function showTab(name) {
+  $("view-traces").classList.toggle("hidden", name !== "traces");
+  $("view-overview").classList.toggle("hidden", name !== "overview");
+  $("tab-traces").classList.toggle("active", name === "traces");
+  $("tab-overview").classList.toggle("active", name === "overview");
+}
+
+$("tab-traces").onclick = () => showTab("traces");
+$("tab-overview").onclick = () => showTab("overview");
+let debounce;
+$("f-q").oninput = () => { clearTimeout(debounce); debounce = setTimeout(loadTraces, 250); };
+for (const id of ["f-status", "f-service", "f-model"]) $(id).onchange = loadTraces;
+$("token").onchange = () => { try { localStorage.setItem("gtx-token", $("token").value); } catch { /* private mode */ } refresh(); };
+$("mode-note").textContent = STATIC
+  ? "Static demo: real traces from the demo agent, exported by CI. Run it yourself to ingest your own."
+  : "Live: OTLP/HTTP on /v1/traces";
+
+async function refresh() {
+  await Promise.all([loadServices(), loadStats(), loadTraces()]);
+  const fromHash = (location.hash.match(/trace=([0-9a-f]{32})/) || [])[1];
+  const first = fromHash || (state.traces[0] && state.traces[0].trace_id);
+  if (first && !state.selected) selectTrace(first, Boolean(fromHash));
+}
+refresh();
+if (!STATIC) setInterval(() => { loadTraces(); loadStats(); }, 15000);
+</script>
+</body>
+</html>
