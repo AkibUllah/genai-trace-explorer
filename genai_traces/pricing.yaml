@@ -1,0 +1,19 @@
+# Price table: USD per 1M tokens, matched against gen_ai.response.model, then gen_ai.request.model.
+# Patterns are shell-style globs; the most specific (longest) matching pattern wins.
+#
+# These are illustrative prices for the demo models, not any provider's current price list.
+# Copy this file, put your contracted prices in it and point PRICING_FILE at the copy.
+models:
+  "chat-large*":
+    input: 2.50
+    output: 10.00
+  "chat-small*":
+    input: 0.15
+    output: 0.60
+  "embed-small*":
+    input: 0.02
+    output: 0.0
+  "local/*":
+    # self-hosted models: no per-token price
+    input: 0.0
+    output: 0.0
