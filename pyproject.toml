@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "genai-trace-explorer"
+version = "0.1.0"
+description = "OpenTelemetry collector and trace viewer for LLM and agent apps: OTLP/HTTP ingest, GenAI semantic conventions, span trees, token and cost rollups, latency and error stats, content redaction."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Akib Jafor" }]
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Framework :: FastAPI",
+  "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "sqlalchemy>=2.0",
+  "pydantic>=2.5",
+  "pydantic-settings>=2.1",
+  "pyyaml>=6.0",
+  "opentelemetry-proto>=1.27",
+  "prometheus-client>=0.20",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
+demo = [
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=4.1",
+  "httpx>=0.26",
+  "ruff>=0.3",
+  "psycopg[binary]>=3.1",
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
+
+[project.scripts]
+genai-traces = "genai_traces.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/AkibUllah/genai-trace-explorer"
+
+[tool.setuptools.packages.find]
+include = ["genai_traces*"]
+
+[tool.setuptools.package-data]
+genai_traces = ["static/*.html", "pricing.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["B008"]
