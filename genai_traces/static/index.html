@@ -238,7 +238,7 @@ function renderDetail(data) {
         <td class="sname" style="padding-left:${4 + s.depth * 16}px" title="${esc(s.name)}"><span class="dot" style="background:var(--${KINDS.includes(s.kind) ? s.kind : "other"})"></span>${esc(s.name)}${s.critical ? '<span class="crit">◆</span>' : ""}${s.orphan ? ' <span class="badge">orphan</span>' : ""}</td>
         <td style="width:45%"><div class="track"><div class="bar ${s.status === "error" ? "err" : ""}" style="left:${(s.offset_ms / total) * 100}%;width:${Math.max((s.duration_ms / total) * 100, 0.3)}%;background:var(--${KINDS.includes(s.kind) ? s.kind : "other"})"></div></div></td>
         <td class="num">${fmtMs(s.duration_ms)}</td>
-        <td class="num">${s.kind === "llm" || s.kind === "embeddings" ? fmtInt((s.input_tokens || 0) + (s.output_tokens || 0)) + " tok" : ""}</td>
+        <td class="num">${s.input_tokens != null || s.output_tokens != null ? fmtInt((s.input_tokens || 0) + (s.output_tokens || 0)) + " tok" : ""}</td>
       </tr>`).join("")}
     </tbody></table></div>
     <div class="attrs" id="span-attrs"><div class="empty">Select a span to see its attributes</div></div>`;
