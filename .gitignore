@@ -28,3 +28,6 @@ htmlcov/
 
 # Codespaces demo seed marker
 .demo-seeded
+
+# Static demo build
+_site/

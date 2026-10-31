@@ -1,0 +1,40 @@
+# Collector + viewer on PostgreSQL. Point any OTLP/HTTP exporter at http://localhost:4318.
+#   docker compose up -d --build
+#   docker compose run --rm demo        # two days of demo traffic over OTLP
+services:
+  collector:
+    build: .
+    ports:
+      - "4318:4318"
+    environment:
+      DATABASE_URL: postgresql://traces:traces@postgres:5432/traces
+      # INGEST_TOKEN: set-me-to-require-a-bearer-token-on-/v1/traces
+      # CAPTURE_CONTENT: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  demo:
+    build: .
+    profiles: ["demo"]
+    command: ["genai-traces", "demo", "--endpoint", "http://collector:4318/v1/traces"]
+    depends_on:
+      collector:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: traces
+      POSTGRES_PASSWORD: traces
+      POSTGRES_DB: traces
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "traces"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
